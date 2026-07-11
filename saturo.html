@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SAT0RU v3 — Cursed Technique Visualizer ULTRA</title>
+  <style>
+    :root {
+      --ink: #f4f4f4;
+      --dim: #8a8a8a;
+      --accent: #00ffff;
+      --warn: #ff3366;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      background: #000; color: var(--ink);
+      font-family: 'Courier New', ui-monospace, monospace;
+      overflow: hidden; user-select: none;
+    }
+    canvas#three { position: fixed; inset: 0; z-index: 1; }
+
+    #grain {
+      position: fixed; inset: 0; pointer-events: none; z-index: 5;
+      mix-blend-mode: overlay; opacity: 0.25;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/></svg>");
+    }
+    #vignette {
+      position: fixed; inset: 0; pointer-events: none; z-index: 6;
+      background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.92) 100%);
+    }
+    #scanlines {
+      position: fixed; inset: 0; pointer-events: none; z-index: 7;
+      background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px);
+      mix-blend-mode: overlay; opacity: 0.5;
+    }
+
+    /* === HUD === */
+    #hud {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 20; padding: 16px 24px;
+      display: flex; justify-content: space-between; align-items: flex-start;
+      pointer-events: none;
+    }
+    .title-block h1 {
+      margin: 0; font-size: 2.4rem; letter-spacing: 12px; font-weight: 900;
+      background: linear-gradient(to bottom, #fff 30%, #555 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .title-block .kanji { font-size: 0.75rem; letter-spacing: 6px; color: var(--dim); margin-top: 4px; }
+
+    .stats {
+      text-align: right; font-size: 0.68rem; color: var(--dim);
+      letter-spacing: 1px; line-height: 1.55;
+    }
+    .stats b { color: var(--ink); font-weight: 700; }
+    .stats .row { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+    .stats .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #ff3344; box-shadow: 0 0 8px currentColor; }
+    .stats .dot.ok { background: #4eff8a; }
+    .stats .gauge { width: 90px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; margin-left: 6px; }
+    .stats .gauge > i { display: block; height: 100%; background: linear-gradient(90deg, #00ffff, #ff00ff); width: 0%; transition: width 0.1s; }
+
+    #technique-name {
+      position: fixed; top: 12%; left: 0; right: 0; text-align: center;
+      z-index: 20; font-size: 1.3rem; letter-spacing: 8px;
+      text-transform: uppercase; color: var(--accent);
+      text-shadow: 0 0 20px currentColor, 0 0 40px currentColor;
+      transition: color 0.3s, transform 0.3s, opacity 0.4s;
+      pointer-events: none;
+    }
+    #technique-name .jp { display: block; font-size: 0.75rem; color: var(--dim); margin-top: 6px; letter-spacing: 4px; }
+    #technique-name.activate { animation: pulse 0.4s ease-out; }
+    @keyframes pulse {
+      0% { transform: scale(0.85); letter-spacing: 16px; opacity: 0.3; }
+      50% { transform: scale(1.08); }
+      100% { transform: scale(1); letter-spacing: 8px; opacity: 1; }
+    }
+
+    /* === Camera Hub === */
+    #video-container {
+      position: fixed; bottom: 2.5vh; left: 50%;
+      transform: translateX(-50%);
+      width: min(92vw, 480px);
+      aspect-ratio: 4 / 3;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 22px; overflow: hidden;
+      z-index: 25; background: #000;
+      box-shadow: 0 12px 50px rgba(0,0,0,0.8), inset 0 0 0 1px rgba(255,255,255,0.05);
+    }
+    #video-container video {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; transform: scaleX(-1); opacity: 0.85;
+    }
+    #output_canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+    .cam-label {
+      position: absolute; top: 8px; left: 12px; z-index: 2;
+      font-size: 0.62rem; letter-spacing: 3px; color: rgba(255,255,255,0.6);
+      pointer-events: none;
+    }
+    .cam-label .rec { color: #ff3344; }
+
+    /* === Side panel === */
+    #panel {
+      position: fixed; right: 16px; top: 50%; transform: translateY(-50%);
+      z-index: 30; background: rgba(8,8,14,0.55);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 14px;
+      padding: 12px 14px; width: 230px;
+      font-size: 0.7rem; letter-spacing: 1px; color: var(--dim);
+      max-height: 80vh; overflow-y: auto;
+    }
+    #panel h3 { margin: 0 0 8px; font-size: 0.7rem; letter-spacing: 4px; color: var(--ink); }
+    #panel h3:not(:first-child) { margin-top: 14px; }
+    .row { display: flex; align-items: center; justify-content: space-between; margin: 7px 0; gap: 6px; }
+    .row label { color: var(--dim); font-size: 0.65rem; }
+    .row input[type=range] { width: 110px; accent-color: var(--accent); }
+    .row .val { color: var(--ink); min-width: 30px; text-align: right; font-size: 0.65rem; }
+    .btn {
+      width: 100%; margin-top: 6px;
+      background: transparent; border: 1px solid rgba(255,255,255,0.15);
+      color: var(--ink); padding: 7px 8px;
+      font-family: inherit; font-size: 0.65rem; letter-spacing: 3px;
+      text-transform: uppercase; cursor: pointer; border-radius: 6px;
+      transition: background 0.2s, border-color 0.2s, color 0.2s;
+    }
+    .btn:hover { background: rgba(255,255,255,0.06); border-color: var(--accent); color: var(--accent); }
+    .btn.danger:hover { border-color: var(--warn); color: var(--warn); }
+    .btn.active { background: rgba(0,255,255,0.1); border-color: var(--accent); color: var(--accent); }
+    .btnrow { display: flex; gap: 6px; }
+    .btnrow .btn { flex: 1; margin-top: 6px; }
+
+    /* === Legend === */
+    #legend {
+      position: fixed; left: 16px; bottom: 16px;
+      z-index: 30; background: rgba(8,8,14,0.55);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 10px 12px; font-size: 0.62rem; color: var(--dim);
+      max-width: 230px; line-height: 1.7;
+    }
+    #legend h4 { margin: 0 0 6px; font-size: 0.65rem; letter-spacing: 3px; color: var(--ink); }
+    #legend kbd {
+      display: inline-block; background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15); border-radius: 3px;
+      padding: 1px 5px; font-size: 0.58rem; color: var(--ink); margin-right: 4px;
+    }
+
+    /* === Toast === */
+    #toast {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.9);
+      z-index: 50; background: rgba(0,0,0,0.75);
+      border: 1px solid var(--accent); color: var(--ink);
+      padding: 18px 28px; font-size: 0.95rem; letter-spacing: 6px;
+      text-transform: uppercase; border-radius: 10px;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    #toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+    /* === Flash overlay === */
+    #flash {
+      position: fixed; inset: 0; z-index: 15;
+      pointer-events: none; opacity: 0;
+      background: radial-gradient(ellipse at center, var(--flash, #fff) 0%, transparent 60%);
+      transition: opacity 0.4s;
+    }
+    #flash.on { opacity: 0.7; }
+
+    /* === Combo meter === */
+    #combo {
+      position: fixed; right: 16px; bottom: 16px;
+      z-index: 30; background: rgba(8,8,14,0.55);
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;
+      padding: 10px 14px; font-size: 0.7rem; color: var(--dim);
+      min-width: 180px; text-align: right;
+    }
+    #combo h4 { margin: 0 0 4px; font-size: 0.65rem; letter-spacing: 3px; color: var(--ink); }
+    #combo .val { font-size: 1.2rem; color: var(--accent); font-weight: 700; }
+    #combo .label { font-size: 0.6rem; color: var(--dim); margin-top: 2px; }
+
+    @media (max-width: 720px) {
+      .stats { display: none; }
+      #panel, #legend, #combo { display: none; }
+      .title-block h1 { font-size: 1.6rem; letter-spacing: 6px; }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="grain"></div>
+  <div id="vignette"></div>
+  <div id="scanlines"></div>
+  <div id="flash"></div>
+
+  <div id="hud">
+    <div class="title-block">
+      <h1>SAT0RU</h1>
+      <div class="kanji">呪 術 廻 戦 — ULTRA v3</div>
+    </div>
+    <div class="stats">
+      <div class="row"><span class="dot ok" id="cam-dot"></span><b id="cam-status">Init</b></div>
+      <div class="row">FPS <b id="fps">--</b><div class="gauge"><i id="fps-bar"></i></div></div>
+      <div class="row">Particles <b id="pcount">--</b></div>
+      <div class="row">Draw calls <b id="dcalls">--</b></div>
+      <div class="row">Hands <b id="hand-status">—</b></div>
+      <div class="row">Latency <b id="latency">--</b> ms</div>
+    </div>
+  </div>
+
+  <div id="technique-name">
+    <span id="name-en">Awaiting Hand</span>
+    <span class="jp" id="name-jp">手を 待って いる</span>
+  </div>
+
+  <div id="video-container">
+    <div class="cam-label"><span class="rec">●</span> CAM // HAND_TRACK</div>
+    <video class="input_video" playsinline></video>
+    <canvas id="output_canvas"></canvas>
+  </div>
+
+  <div id="panel">
+    <h3>Particles</h3>
+    <div class="row">
+      <label>Count</label>
+      <input type="range" id="r-count" min="50000" max="1000000" step="10000" value="200000" />
+      <span class="val" id="v-count">200k</span>
+    </div>
+    <div class="row">
+      <label>Size</label>
+      <input type="range" id="r-size" min="0.1" max="3" step="0.05" value="0.5" />
+      <span class="val" id="v-size">0.5</span>
+    </div>
+
+    <h3>FX</h3>
+    <div class="row">
+      <label>Bloom</label>
+      <input type="range" id="r-bloom" min="0" max="6" step="0.1" value="2.0" />
+      <span class="val" id="v-bloom">2.0</span>
+    </div>
+    <div class="row">
+      <label>Chroma</label>
+      <input type="range" id="r-chroma" min="0" max="0.02" step="0.0005" value="0.005" />
+      <span class="val" id="v-chroma">0.005</span>
+    </div>
+    <div class="row">
+      <label>Smooth</label>
+      <input type="range" id="r-smooth" min="0.05" max="0.4" step="0.01" value="0.18" />
+      <span class="val" id="v-smooth">0.18</span>
+    </div>
+    <div class="row">
+      <label>Shake</label>
+      <input type="range" id="r-shake" min="0" max="3" step="0.05" value="1.0" />
+      <span class="val" id="v-shake">1.0</span>
+    </div>
+    <div class="row">
+      <label>Speed</label>
+      <input type="range" id="r-speed" min="0.2" max="3" step="0.05" value="1.0" />
+      <span class="val" id="v-speed">1.0</span>
+    </div>
+
+    <h3>Mode</h3>
+    <div class="btnrow">
+      <button class="btn active" id="btn-mode-1">Mirror</button>
+      <button class="btn" id="btn-mode-2">Silhouette</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="btn-mode-3">AR Overlay</button>
+      <button class="btn" id="btn-mode-4">Fullscreen</button>
+    </div>
+
+    <h3>System</h3>
+    <button class="btn" id="btn-audio">Enable Audio</button>
+    <div class="btnrow">
+      <button class="btn" id="btn-rec">⏺ Record</button>
+      <button class="btn" id="btn-shot">📷 Shot</button>
+    </div>
+    <button class="btn danger" id="btn-reset">Reset</button>
+  </div>
+
+  <div id="legend">
+    <h4>Gestures</h4>
+    <div><kbd>1</kbd> Index → <b style="color:#ff2a2a">赤 Red</b></div>
+    <div><kbd>2</kbd> Index+Mid → <b style="color:#22ddff">無量空処 Void</b></div>
+    <div><kbd>3</kbd> 3 fingers / pinch → <b style="color:#9a3aff">茈 Purple</b></div>
+    <div><kbd>4</kbd> Open palm → <b style="color:#cc0000">伏魔御廚子 Shrine</b></div>
+    <div><kbd>5</kbd> 2 open palms → <b style="color:#1d4dff">蒼 Blue</b></div>
+    <div><kbd>6</kbd> Thumbs up → <b style="color:#ff003c">黒閃 Black Flash</b></div>
+    <div><kbd>0</kbd> Neutral</div>
+    <div style="margin-top:6px"><kbd>R</kbd> Rec  <kbd>P</kbd> Shot  <kbd>H</kbd> UI  <kbd>F</kbd> Full  <kbd>A</kbd> Auto</div>
+  </div>
+
+  <div id="combo">
+    <h4>POWER</h4>
+    <div class="val" id="combo-val">0</div>
+    <div class="label" id="combo-label">— standby —</div>
+  </div>
+
+  <div id="toast"></div>
+
+<script type="module">
+  import * as THREE from 'three';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+  import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+  import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+  import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+
+  // ====================================================================
+  // CONFIG
+  // ====================================================================
+  const CFG = {
+    count: 200000,
+    size: 0.5,
+    bloom: 2.0,
+    chroma: 0.005,
+    smooth: 0.18,
+    shake: 1.0,
+    speed: 1.0,
+    audio: false,
+    mode: 'mirror', // mirror | silhouette | ar
+    auto: false,
+  };
+
+  const state = {
+    currentTech: 'neutral',
+    candidateTech: 'neutral',
+    candidateFrames: 0,
+    lastDetection: 0,
+    handCount: 0,
+    shakeIntensity: 0,
+    hidden: false,
+    combo: 0,
+    comboDecay: 0,
+    lastSwitch: 0,
+    shockwaves: [],
+    arcs: [],
+    beat: 0,
+  };
+
+  const CONFIRM_FRAMES = 4;
+  const COOLDOWN_MS = 350;
+
+  // ====================================================================
+  // THREE.JS
+  // ====================================================================
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000010, 0.008);
+
+  const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 3000);
+  camera.position.set(0, 0, 80);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+  renderer.setClearColor(0x000005, 1);
+  renderer.info.autoReset = false;
+  document.body.appendChild(renderer.domElement);
+
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), CFG.bloom, 0.5, 0.6);
+  composer.addPass(bloomPass);
+
+  // Chromatic aberration + halftone + film
+  const FXShader = {
+    uniforms: {
+      tDiffuse: { value: null },
+      time: { value: 0 },
+      chroma: { value: CFG.chroma },
+      vignette: { value: 1.0 },
+      halftone: { value: 0.0 },
+      flash: { value: 0.0 },
+      flashColor: { value: new THREE.Color(1,1,1) },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+    `,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float time;
+      uniform float chroma;
+      uniform float vignette;
+      uniform float halftone;
+      uniform float flash;
+      uniform vec3 flashColor;
+      varying vec2 vUv;
+      void main() {
+        vec2 uv = vUv;
+        vec2 d = uv - 0.5;
+        float dist = length(d);
+        // chromatic aberration scaled by distance from center
+        float ca = chroma * (0.4 + dist * 1.6);
+        vec2 dir = normalize(d + 1e-6);
+        float r = texture2D(tDiffuse, uv - dir * ca).r;
+        float g = texture2D(tDiffuse, uv).g;
+        float b = texture2D(tDiffuse, uv + dir * ca).b;
+        vec3 col = vec3(r, g, b);
+        // film grain
+        float grain = (fract(sin(dot(uv * 1000.0 + time, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) * 0.04;
+        col += grain;
+        // halftone overlay
+        if (halftone > 0.0) {
+          vec2 hp = uv * 600.0;
+          float h = step(0.5, length(fract(hp) - 0.5));
+          col = mix(col, col * (1.0 - halftone * h * 0.3), 0.5);
+        }
+        // flash
+        col = mix(col, flashColor, flash);
+        // vignette
+        float v = smoothstep(0.85, 0.2, dist);
+        col *= mix(1.0, v, vignette);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  };
+  const fxPass = new ShaderPass(FXShader);
+  composer.addPass(fxPass);
+
+  const fxaaPass = new ShaderPass(FXAAShader);
+  composer.addPass(fxaaPass);
+  composer.addPass(new OutputPass());
+
+  // ====================================================================
+  // PARTICLES — custom shader for size attenuation
+  // ====================================================================
+  const sprite = makeSpriteTexture();
+  let COUNT = CFG.count;
+  let positions, colors, sizes, targetPositions, targetColors, targetSizes;
+  let geometry, particles, pointMat;
+
+  const vert = `
+    attribute float size;
+    varying vec3 vColor;
+    void main() {
+      vColor = color;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (320.0 / -mv.z);
+      gl_Position = projectionMatrix * mv;
+    }
+  `;
+  const frag = `
+    uniform sampler2D pointTex;
+    varying vec3 vColor;
+    void main() {
+      vec4 t = texture2D(pointTex, gl_PointCoord);
+      if (t.a < 0.02) discard;
+      gl_FragColor = vec4(vColor * t.rgb, t.a);
+    }
+  `;
+
+  function buildParticles(n) {
+    if (particles) {
+      scene.remove(particles);
+      particles.geometry.dispose();
+    }
+    COUNT = n;
+    geometry = new THREE.BufferGeometry();
+    positions = new Float32Array(COUNT * 3);
+    colors = new Float32Array(COUNT * 3);
+    sizes = new Float32Array(COUNT);
+    targetPositions = new Float32Array(COUNT * 3);
+    targetColors = new Float32Array(COUNT * 3);
+    targetSizes = new Float32Array(COUNT);
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1).setUsage(THREE.DynamicDrawUsage));
+
+    pointMat = new THREE.ShaderMaterial({
+      uniforms: { pointTex: { value: sprite } },
+      vertexShader: vert,
+      fragmentShader: frag,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      vertexColors: true,
+    });
+    particles = new THREE.Points(geometry, pointMat);
+    particles.frustumCulled = false;
+    scene.add(particles);
+    document.getElementById('pcount').textContent = (COUNT/1000).toFixed(0) + 'k';
+    applyTechTargets('neutral');
+    positions.set(targetPositions);
+    colors.set(targetColors);
+    sizes.set(targetSizes);
+  }
+
+  function makeSpriteTexture() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    const grad = g.createRadialGradient(64,64,0,64,64,64);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.25, 'rgba(255,255,255,0.75)');
+    grad.addColorStop(0.6, 'rgba(255,255,255,0.2)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad; g.fillRect(0,0,128,128);
+    const t = new THREE.CanvasTexture(c);
+    t.needsUpdate = true;
+    return t;
+  }
+
+  // ====================================================================
+  // TECHNIQUE TARGETS
+  // ====================================================================
+  function applyTechTargets(tech) {
+    for (let i = 0; i < COUNT; i++) {
+      const p = computeTarget(i, tech);
+      const i3 = i*3;
+      targetPositions[i3]   = p.x;
+      targetPositions[i3+1] = p.y;
+      targetPositions[i3+2] = p.z;
+      targetColors[i3]      = p.r;
+      targetColors[i3+1]    = p.g;
+      targetColors[i3+2]    = p.b;
+      targetSizes[i]        = p.s;
+    }
+  }
+
+  function computeTarget(i, tech) {
+    switch (tech) {
+      case 'red':     return targetRed(i);
+      case 'void':    return targetVoid(i);
+      case 'purple':  return targetPurple(i);
+      case 'shrine':  return targetShrine(i);
+      case 'blue':    return targetBlue(i);
+      case 'black':   return targetBlack(i);
+      default:        return targetNeutral(i);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // NEUTRAL — ambient cursed energy drifting around the sorcerer
+  // ------------------------------------------------------------------
+  function targetNeutral(i) {
+    if (i < COUNT * 0.04) {
+      const r = 20 + Math.random()*40;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph), r:0.18, g:0.22, b:0.4, s:0.5 };
+    }
+    return { x:0, y:0, z:0, r:0, g:0, b:0, s:0 };
+  }
+
+  // ------------------------------------------------------------------
+  // RED — Cursed Technique Reversal: Red (反転術式「赫」)
+  // In the show: blinding white-hot core, an INSTANT explosive push
+  // (repulsion / inverted Blue), no spiral arms. Just an omnidirectional
+  // blast radiating outward at light speed.
+  // ------------------------------------------------------------------
+  function targetRed(i) {
+    // ~10% — incandescent white core (the hottest center of Red)
+    if (i < COUNT * 0.10) {
+      const r = Math.pow(Math.random(), 2.0) * 4;  // biased toward center
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 1.6, g: 1.4, b: 1.2, s: 4.0 };  // white-hot
+    }
+    // ~55% — pure red repulsion shell (the actual "Red" volume)
+    else if (i < COUNT * 0.65) {
+      const u = Math.random();
+      const r = 4 + u * 36;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      // bright red, slight orange tint at the very core, deep red at the edge
+      const heat = 1.0 - u;
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 1.0*heat + 0.5, g: 0.0, b: 0.0, s: 1.6 + heat*1.0 };
+    }
+    // ~20% — outer blast wave (thin red ring expanding outward)
+    else if (i < COUNT * 0.85) {
+      const u = Math.random();
+      const r = 36 + u * 18;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.9, g: 0.0, b: 0.0, s: 0.9 };
+    }
+    // ~15% — scattered embers flung far
+    else {
+      return { x:(Math.random()-0.5)*200, y:(Math.random()-0.5)*200, z:(Math.random()-0.5)*200,
+               r: 0.6, g: 0.1, b: 0.0, s: 0.5 };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // BLUE — Cursed Technique Lapse: Blue (呪術反転「蒼」)
+  // In the show: an ATTRACTIVE pull, a perfectly smooth dark blue
+  // sphere with a thin rim of brighter blue, and a rotating halo of
+  // imaginary mass particles orbiting in the equatorial plane.
+  // ------------------------------------------------------------------
+  function targetBlue(i) {
+    // ~35% — the sphere itself (dark blue, slightly luminous)
+    if (i < COUNT * 0.35) {
+      const r = Math.cbrt(Math.random()) * 22;  // uniform volume
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.05, g: 0.25, b: 0.7, s: 1.4 };
+    }
+    // ~10% — bright equatorial rim of the sphere
+    else if (i < COUNT * 0.45) {
+      const a = Math.random()*Math.PI*2;
+      const r = 22 + (Math.random()-0.5)*0.8;
+      return { x: r*Math.cos(a), y: (Math.random()-0.5)*0.4, z: r*Math.sin(a),
+               r: 0.3, g: 0.7, b: 1.0, s: 2.4 };
+    }
+    // ~35% — orbiting imaginary mass: a flat disc in the XZ plane
+    else if (i < COUNT * 0.80) {
+      const a = Math.random()*Math.PI*2;
+      const r = 22 + (Math.random()-0.5)*1.0;
+      const y = (Math.random()-0.5) * 1.2;  // very flat disc
+      return { x: r*Math.cos(a), y, z: r*Math.sin(a),
+               r: 0.4, g: 0.85, b: 1.0, s: 1.0 };
+    }
+    // ~20% — second outer orbit ring (the "wider" imaginary mass)
+    else {
+      const a = Math.random()*Math.PI*2;
+      const r = 32 + Math.random()*8;
+      return { x: r*Math.cos(a), y: (Math.random()-0.5)*0.6, z: r*Math.sin(a),
+               r: 0.2, g: 0.5, b: 1.0, s: 0.7 };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // PURPLE — Hollow Purple (虚式「茈」)
+  // In the show: a chaotic SPHERE that contains a red core (Red)
+  // surrounded by a blue outer shell (Blue) + an invisible mass.
+  // The red and blue DO NOT mix — they exist together as different
+  // densities within the same sphere. The whole thing moves slowly
+  // and crushes everything it touches.
+  // ------------------------------------------------------------------
+  function targetPurple(i) {
+    // 8% — the inner RED core (small, hot, dense — Gojo's Red inside)
+    if (i < COUNT * 0.08) {
+      const r = Math.random() * 4;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 1.2, g: 0.1, b: 0.2, s: 3.2 };
+    }
+    // 18% — mid-shell of mixed red+blue (the "fictitious mass" boundary)
+    else if (i < COUNT * 0.26) {
+      const r = 4 + Math.random() * 4;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      // oscillating red/blue/purple to show the fusion boundary
+      const variant = Math.random();
+      let col;
+      if (variant < 0.4) col = { r: 0.7, g: 0.0, b: 0.4 };  // reddish
+      else if (variant < 0.8) col = { r: 0.2, g: 0.0, b: 0.9 };  // bluish
+      else col = { r: 0.6, g: 0.2, b: 0.95 };  // purple
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: col.r, g: col.g, b: col.b, s: 2.0 };
+    }
+    // 30% — the BLUE outer shell (the inverted-attraction Blue)
+    else if (i < COUNT * 0.56) {
+      const r = 8 + Math.cbrt(Math.random()) * 10;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.3, g: 0.2, b: 0.95, s: 1.5 };
+    }
+    // 10% — bright violet edge / event horizon of the whole construct
+    else if (i < COUNT * 0.66) {
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      const r = 17 + (Math.random()-0.5)*1.2;
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.9, g: 0.4, b: 1.0, s: 2.6 };
+    }
+    // 14% — chaotic distortion field outside the sphere (the space
+    // around Hollow Purple warps and tears — this is that effect)
+    else if (i < COUNT * 0.80) {
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      const r = 20 + Math.random() * 18;
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.5, g: 0.2, b: 0.8, s: 0.8 };
+    }
+    // 20% — flung debris from the friction field
+    else {
+      return { x:(Math.random()-0.5)*180, y:(Math.random()-0.5)*180, z:(Math.random()-0.5)*180,
+               r: 0.4, g: 0.2, b: 0.7, s: 0.5 };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // VOID — Unlimited Void (無量空処)
+  // In the show: a vast black void with a single INFINITE VERTICAL
+  // STREAM of glowing kanji/data running straight down from the sky,
+  // a glowing blue Six Eyes in the center, and an outer ring of
+  // "floating tombstones" (gravestones for every soul ever trapped).
+  // ------------------------------------------------------------------
+  function targetVoid(i) {
+    // 22% — the vertical infinite kanji stream (Gojo's domain hallmark)
+    if (i < COUNT * 0.22) {
+      // kanji glyphs stacked vertically
+      const row = Math.floor(i / 7) % 200;
+      const col = i % 7;
+      const x = (col - 3) * 0.8 + (Math.random()-0.5)*0.3;
+      const z = (Math.random()-0.5)*2.5;
+      const y = 60 - row * 0.6 + (Math.random()-0.5)*0.4;
+      return { x, y, z, r: 0.6, g: 1.0, b: 1.0, s: 1.6 };
+    }
+    // 4% — the Six Eyes (bright cyan-blue eye) at the center
+    else if (i < COUNT * 0.26) {
+      const side = (i % 2 === 0) ? 1 : -1;
+      return { x: side*0.7 + (Math.random()-0.5)*0.15, y: 0 + (Math.random()-0.5)*0.15, z: 0,
+               r: 0.4, g: 0.9, b: 1.0, s: 3.2 };
+    }
+    // 10% — inner horizon ring (very thin, bright white)
+    else if (i < COUNT * 0.36) {
+      const a = Math.random()*Math.PI*2;
+      const r = 14 + (Math.random()-0.5)*0.6;
+      return { x: r*Math.cos(a), y: (Math.random()-0.5)*0.4, z: r*Math.sin(a),
+               r: 1, g: 1, b: 1, s: 2.2 };
+    }
+    // 18% — tombstone ring (tall thin vertical marks around the perimeter)
+    else if (i < COUNT * 0.54) {
+      const stone = i % 24;
+      const baseA = (stone / 24) * Math.PI * 2;
+      const a = baseA + (Math.random()-0.5)*0.05;
+      const r = 24 + Math.random()*3;
+      const h = Math.random() * 10 + 4;
+      const y = -h/2 + (Math.random()-0.5)*0.5;
+      return { x: r*Math.cos(a), y, z: r*Math.sin(a),
+               r: 0.5, g: 0.6, b: 0.9, s: 1.0 };
+    }
+    // 12% — outer horizon ring (larger, dimmer, the actual domain boundary)
+    else if (i < COUNT * 0.66) {
+      const a = Math.random()*Math.PI*2;
+      const r = 30 + (Math.random()-0.5)*1.0;
+      return { x: r*Math.cos(a), y: (Math.random()-0.5)*0.8, z: r*Math.sin(a),
+               r: 0.6, g: 0.9, b: 1.0, s: 1.5 };
+    }
+    // 34% — deep void backdrop (vast black emptiness, sparse blue specks)
+    else {
+      const r = 40 + Math.random()*200;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.08, g: 0.35, b: 0.8, s: 0.5 };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // SHRINE — Malevolent Shrine (伏魔御廚子)
+  // In the show: an ominous ground-level domain. Torii gates float in
+  // a 2x2 grid, three small shrine buildings stand at the back, a
+  // crimson pool of water covers the ground, and disembodied HANDS
+  // and a giant disemboweled-mouth TOOTH appear at the front as
+  // indicators of the guaranteed-hit cleave/dismantle. Dark, heavy,
+  // oppressive — NOT flashy.
+  // ------------------------------------------------------------------
+  function targetShrine(i) {
+    // 28% — the crimson ground / water plane
+    if (i < COUNT * 0.28) {
+      return { x:(Math.random()-0.5)*110, y: -18, z:(Math.random()-0.5)*110,
+               r: 0.45, g: 0.0, b: 0.04, s: 0.55 };
+    }
+    // 10% — 4 floating torii gates (top bar, two pillars, second bar)
+    else if (i < COUNT * 0.38) {
+      const gate = i % 4;
+      const gx = (gate % 2 === 0 ? 1 : -1) * 18;
+      const gz = (gate < 2 ? 1 : -1) * 12;
+      // height tiers
+      const u = Math.random();
+      let y, h;
+      if (u < 0.08) { y = 6; h = 1; }  // top crossbar (kasagi)
+      else if (u < 0.16) { y = 4.5; h = 0.6; }  // second crossbar (nuki)
+      else { y = -4 + Math.random() * 8; h = 1.0; }  // pillars
+      return { x: gx + (Math.random()-0.5)*0.6, y, z: gz + (Math.random()-0.5)*0.6,
+               r: 0.55, g: 0.05, b: 0.0, s: h + 0.3 };
+    }
+    // 8% — 3 small shrine buildings at the back
+    else if (i < COUNT * 0.46) {
+      const bldg = i % 3;
+      const bx = (bldg - 1) * 14;
+      const bz = -22;
+      // triangular roof
+      const u = Math.random();
+      let y, r, g, b, s;
+      if (u < 0.3) { y = 4 + Math.random()*2; r=0.3; g=0.0; b=0.0; s=0.7; }  // dark roof
+      else if (u < 0.7) { y = -2 + Math.random()*6; r=0.4; g=0.0; b=0.0; s=0.6; }  // body
+      else { y = 6 + Math.random()*1.5; r=0.5; g=0.2; b=0.05; s=0.9; }  // golden finial
+      return { x: bx + (Math.random()-0.5)*4, y, z: bz + (Math.random()-0.5)*3,
+               r, g, b, s };
+    }
+    // 12% — disembodied HANDS rising from the ground (Cleave)
+    else if (i < COUNT * 0.58) {
+      const hand = i % 18;
+      const a = (hand / 18) * Math.PI * 2;
+      const r = 5 + Math.random() * 14;
+      const x = r * Math.cos(a);
+      const z = r * Math.sin(a);
+      // hand = cluster of particles around (x, -16, z) going up
+      const y = -16 + Math.random() * 8;
+      return { x: x + (Math.random()-0.5)*0.8, y, z: z + (Math.random()-0.5)*0.8,
+               r: 0.6, g: 0.05, b: 0.05, s: 0.8 };
+    }
+    // 6% — the giant open mouth (the Dismantle/cleave "target" indicator)
+    else if (i < COUNT * 0.64) {
+      // arch shape at z = +18, facing camera
+      const u = Math.random();
+      const ang = (u - 0.5) * Math.PI * 0.8;  // mouth opens up
+      const r = 6 + Math.random()*2;
+      return { x: r*Math.sin(ang), y: -8 + r*Math.cos(ang)*0.6, z: 18 + (Math.random()-0.5)*2,
+               r: 0.7, g: 0.0, b: 0.0, s: 1.2 };
+    }
+    // 6% — kanji-pillars / binding texts floating in the air (vertical lines)
+    else if (i < COUNT * 0.70) {
+      const col = i % 6;
+      const x = (col - 2.5) * 6 + (Math.random()-0.5)*0.3;
+      const z = -6 + (Math.random()-0.5)*12;
+      const y = -10 + Math.random() * 22;
+      return { x, y, z, r: 0.7, g: 0.1, b: 0.05, s: 1.4 };
+    }
+    // 30% — dark ominous fog / atmosphere above
+    else {
+      const r = 10 + Math.random() * 50;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th)*0.3 + 4,
+               z: r*Math.cos(ph),
+               r: 0.3, g: 0.0, b: 0.0, s: 0.4 };
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // BLACK FLASH (黒閃) — the 0.000001-second distortion
+  // In the show: a 1-frame hit that warps the world around the impact
+  // point — red lightning crackles from black void, the punch itself
+  // is red on black, everything is INVERTED in that single frame.
+  // ------------------------------------------------------------------
+  function targetBlack(i) {
+    // 20% — the dense red impact sphere (the "red on black" of the hit)
+    if (i < COUNT * 0.20) {
+      const r = Math.pow(Math.random(), 1.5) * 6;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 1.0, g: 0.0, b: 0.05, s: 3.6 };
+    }
+    // 25% — black void around the impact (the world literally turns black)
+    else if (i < COUNT * 0.45) {
+      const r = 6 + Math.cbrt(Math.random()) * 18;
+      const th = Math.random()*Math.PI*2;
+      const ph = Math.acos(2*Math.random()-1);
+      return { x: r*Math.sin(ph)*Math.cos(th), y: r*Math.sin(ph)*Math.sin(th), z: r*Math.cos(ph),
+               r: 0.0, g: 0.0, b: 0.0, s: 2.0 };
+    }
+    // 25% — red lightning radiating from the impact point
+    else if (i < COUNT * 0.70) {
+      // jagged lines from center
+      const bolts = 14;
+      const bolt = i % bolts;
+      const u = Math.random();
+      const baseA = (bolt / bolts) * Math.PI * 2;
+      const zigzag = Math.sin(u * 30) * 3;
+      const r = 4 + u * 30;
+      const angle = baseA + zigzag * 0.1;
+      return { x: r*Math.cos(angle), y: r*Math.sin(angle), z: (Math.random()-0.5)*4,
+               r: 1.0, g: 0.0, b: 0.0, s: 1.0 };
+    }
+    // 15% — outer shockwave (the ground actually cracks outward)
+    else if (i < COUNT * 0.85) {
+      const a = Math.random()*Math.PI*2;
+      const r = 30 + Math.random()*12;
+      return { x: r*Math.cos(a), y: (Math.random()-0.5)*0.6, z: r*Math.sin(a),
+               r: 0.8, g: 0.0, b: 0.0, s: 0.9 };
+    }
+    // 15% — displaced earth / debris
+    else {
+      return { x:(Math.random()-0.5)*160, y:(Math.random()-0.5)*120, z:(Math.random()-0.5)*160,
+               r: 0.4, g: 0.0, b: 0.0, s: 0.4 };
+    }
+  }
+
+  // ====================================================================
+  // SHOCKWAVE RINGS
+  // ====================================================================
+  let shockwaveGroup;
+  function initShockwaves() {
+    shockwaveGroup = new THREE.Group();
+    scene.add(shockwaveGroup);
+  }
+  function spawnShockwave(color, size = 30, contract = false) {
+    const geo = new THREE.RingGeometry(0.5, 0.7, 64);
+    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(0, 0, 0);
+    mesh.rotation.x = Math.random() * Math.PI;
+    shockwaveGroup.add(mesh);
+    // if contract: starts large and shrinks (used by Blue)
+    const startScale = contract ? size * 0.7 : 0.5;
+    const endScale = contract ? 0.5 : size;
+    state.shockwaves.push({ mesh, life: 0, maxLife: contract ? 1.0 : 1.4, startScale, endScale });
+  }
+
+  // ====================================================================
+  // LIGHTNING ARCS
+  // ====================================================================
+  let arcGroup;
+  function initArcs() {
+    arcGroup = new THREE.Group();
+    scene.add(arcGroup);
+  }
+  function spawnArc(color) {
+    const points = [];
+    const start = new THREE.Vector3((Math.random()-0.5)*60, (Math.random()-0.5)*40, (Math.random()-0.5)*60);
+    const end   = new THREE.Vector3((Math.random()-0.5)*60, (Math.random()-0.5)*40, (Math.random()-0.5)*60);
+    const segments = 24;
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const p = new THREE.Vector3().lerpVectors(start, end, t);
+      if (i > 0 && i < segments) {
+        p.x += (Math.random()-0.5) * 6;
+        p.y += (Math.random()-0.5) * 6;
+        p.z += (Math.random()-0.5) * 6;
+      }
+      points.push(p);
+    }
+    const geo = new THREE.BufferGeometry().setFromPoints(points);
+    const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, linewidth: 2 });
+    const line = new THREE.Line(geo, mat);
+    arcGroup.add(line);
+    state.arcs.push({ line, life: 0, maxLife: 0.25 });
+  }
+
+  // ====================================================================
+  // LENS FLARE / STAR
+  // ====================================================================
+  let star;
+  function initStar() {
+    const geo = new THREE.PlaneGeometry(20, 20);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { color: { value: new THREE.Color(0xffffff) }, opacity: { value: 0.0 } },
+      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `
+        uniform vec3 color; uniform float opacity; varying vec2 vUv;
+        void main() {
+          vec2 d = vUv - 0.5;
+          float r = length(d);
+          float core = exp(-r*40.0);
+          float halo = exp(-r*6.0) * 0.4;
+          float rays = max(0.0, 1.0 - abs(d.x) * 30.0) * exp(-abs(d.y)*10.0)
+                     + max(0.0, 1.0 - abs(d.y) * 30.0) * exp(-abs(d.x)*10.0);
+          float a = (core + halo + rays * 0.5) * opacity;
+          if (a < 0.01) discard;
+          gl_FragColor = vec4(color, a);
+        }
+      `,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    star = new THREE.Mesh(geo, mat);
+    star.position.set(0, 0, 0);
+    star.renderOrder = 999;
+    scene.add(star);
+  }
+  function pulseStar(color, strength = 1) {
+    if (!star) return;
+    star.material.uniforms.color.value.set(color);
+    star.material.uniforms.opacity.value = strength;
+    state.starPulse = 1.0;
+  }
+
+  // ====================================================================
+  // MEDIAPIPE
+  // ====================================================================
+  const videoElement = document.querySelector('.input_video');
+  const canvasElement = document.getElementById('output_canvas');
+  const canvasCtx = canvasElement.getContext('2d');
+  let glowColor = '#00ffff';
+
+  const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+  hands.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5,
+    selfieMode: true,
+  });
+  hands.onResults(onHandResults);
+
+  function onHandResults(results) {
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+    state.handCount = (results.multiHandLandmarks || []).length;
+    document.getElementById('hand-status').textContent =
+      state.handCount > 0 ? `${state.handCount} detected` : '—';
+
+    let detected = 'neutral';
+    if (state.handCount > 0) {
+      const lms = results.multiHandLandmarks;
+      const allOpen  = lms.every(isOpenPalm);
+      const allFist  = lms.every(isFist);
+      const anyThumbsUp = lms.some(isThumbsUp);
+      const anyIndex = lms.some((lm) => isUp(lm,8,6) && !isUp(lm,12,10));
+      const anyTwo   = lms.some((lm) => isUp(lm,8,6) && isUp(lm,12,10) && !isUp(lm,16,14));
+      const anyThree = lms.some((lm) => isUp(lm,8,6) && isUp(lm,12,10) && isUp(lm,16,14));
+      const anyPinch = lms.some((lm) => pinchDist(lm) < 0.05);
+
+      if (anyPinch) detected = 'purple';
+      else if (anyThumbsUp) detected = 'black';
+      else if (allOpen && state.handCount >= 2) detected = 'blue';
+      else if (allOpen) detected = 'shrine';
+      else if (anyThree) detected = 'purple';
+      else if (anyTwo) detected = 'void';
+      else if (anyIndex) detected = 'red';
+      else if (allFist) detected = 'neutral';
+    }
+
+    if (CFG.mode === 'mirror' || CFG.mode === 'ar') {
+      if (results.multiHandLandmarks) {
+        results.multiHandLandmarks.forEach((lm) => {
+          drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, { color: glowColor, lineWidth: 4 });
+          drawLandmarks(canvasCtx, lm, { color: '#fff', lineWidth: 1, radius: 2.5 });
+        });
+      }
+    } else if (CFG.mode === 'silhouette') {
+      // render silhouette of the hand area
+      if (results.multiHandLandmarks) {
+        canvasCtx.fillStyle = 'rgba(0,0,0,0.85)';
+        results.multiHandLandmarks.forEach((lm) => {
+          lm.forEach((p) => {
+            canvasCtx.beginPath();
+            canvasCtx.arc(p.x * canvasElement.width, p.y * canvasElement.height, 18, 0, Math.PI*2);
+            canvasCtx.fill();
+          });
+        });
+        canvasCtx.globalCompositeOperation = 'destination-out';
+        results.multiHandLandmarks.forEach((lm) => {
+          drawConnectors(canvasCtx, lm, HAND_CONNECTIONS, { color: '#000', lineWidth: 30 });
+        });
+        canvasCtx.globalCompositeOperation = 'source-over';
+      }
+    }
+    canvasCtx.restore();
+    confirmGesture(detected);
+  }
+
+  function isUp(lm, t, p) { return lm[t].y < lm[p].y; }
+  function pinchDist(lm) { return Math.hypot(lm[8].x - lm[4].x, lm[8].y - lm[4].y); }
+  function isOpenPalm(lm) {
+    return isUp(lm,8,6) && isUp(lm,12,10) && isUp(lm,16,14) && isUp(lm,20,18)
+      && Math.hypot(lm[4].x - lm[17].x, lm[4].y - lm[17].y) > 0.15;
+  }
+  function isFist(lm) {
+    return !isUp(lm,8,6) && !isUp(lm,12,10) && !isUp(lm,16,14) && !isUp(lm,20,18);
+  }
+  function isThumbsUp(lm) {
+    // thumb extended up, all other fingers curled
+    return isUp(lm,4,3) && !isUp(lm,8,6) && !isUp(lm,12,10) && !isUp(lm,16,14) && !isUp(lm,20,18);
+  }
+
+  function confirmGesture(detected) {
+    const now = performance.now();
+    if (detected === state.candidateTech) {
+      state.candidateFrames++;
+    } else {
+      state.candidateTech = detected;
+      state.candidateFrames = 1;
+    }
+    if (state.candidateFrames >= CONFIRM_FRAMES && (now - state.lastDetection) > COOLDOWN_MS) {
+      state.lastDetection = now;
+      setTech(detected);
+    }
+  }
+
+  // ====================================================================
+  // TECH ROUTER
+  // ====================================================================
+  const TECH_META = {
+    neutral: { name: 'Neutral State',         jp: '手を 待って いる',       color: '#888888', bloom: 1.0,  shake: 0.0,  speed: 0.3, fx: 'soft' },
+    red:     { name: 'Reversal: Red',          jp: '反 転 術 式 — 赫',       color: '#ff2a2a', bloom: 3.4,  shake: 1.6,  speed: 1.8, fx: 'blast' },
+    void:    { name: 'Unlimited Void',         jp: '領 域 展 開 — 無 量 空 処', color: '#22ddff', bloom: 2.2,  shake: 0.0,  speed: 0.5, fx: 'silent' },
+    purple:  { name: 'Hollow Purple',          jp: '虚 式 — 茈',             color: '#9a3aff', bloom: 4.0,  shake: 0.6,  speed: 0.7, fx: 'crush' },
+    shrine:  { name: 'Malevolent Shrine',      jp: '領 域 展 開 — 伏 魔 御 廚 子', color: '#cc0000', bloom: 1.8,  shake: 0.3,  speed: 0.4, fx: 'ominous' },
+    blue:    { name: 'Imaginary Technique: Blue', jp: '呪 術 反 転 — 蒼',    color: '#1d4dff', bloom: 2.4,  shake: 0.2,  speed: 0.9, fx: 'pull' },
+    black:   { name: 'Black Flash',            jp: '黒 閃',                   color: '#ff003c', bloom: 5.0,  shake: 2.4,  speed: 3.0, fx: 'flash' },
+  };
+
+  function setTech(tech) {
+    if (state.currentTech === tech) return;
+    state.currentTech = tech;
+    const meta = TECH_META[tech] || TECH_META.neutral;
+    glowColor = meta.color;
+    document.documentElement.style.setProperty('--accent', meta.color);
+    document.getElementById('name-en').textContent = meta.name;
+    document.getElementById('name-jp').textContent = meta.jp;
+    const nameEl = document.getElementById('technique-name');
+    nameEl.style.color = meta.color;
+    nameEl.classList.remove('activate');
+    void nameEl.offsetWidth;
+    nameEl.classList.add('activate');
+    bloomPass.strength = meta.bloom;
+    state.shakeIntensity = (tech === 'neutral') ? 0 : meta.shake;
+    applyTechTargets(tech);
+
+    // Flash overlay
+    const flash = document.getElementById('flash');
+    flash.style.setProperty('--flash', meta.color);
+    flash.classList.add('on');
+    setTimeout(() => flash.classList.remove('on'), 280);
+
+    // FX layer
+    fxPass.uniforms.flash.value = 1.0;
+    fxPass.uniforms.flashColor.value.set(meta.color);
+    setTimeout(() => { fxPass.uniforms.flash.value = 0.0; }, 250);
+
+    // Per-technique trigger FX (matched to the show's feel)
+    // soft   — neutral idle, no shockwave
+    // blast  — instant omnidirectional push, white flash, big shock, no arcs
+    // silent — domain expansion, no shake, slow bloom rise, single thin ring
+    // crush  — slow massive wave, multiple heavy rings, low rumble
+    // ominous — slow heavy ring, no flash, fog (sets the dread)
+    // pull   — gentle implosion, contracting ring
+    // flash  — pure impact: instant white flash, big shake, multiple arcs
+    const fx = meta.fx;
+    if (fx === 'soft') {
+      // nothing
+    } else if (fx === 'blast') {
+      spawnShockwave(meta.color, 45);
+      spawnShockwave('#ffffff', 30);  // inner white shock
+      pulseStar('#ffffff', 0.8);
+    } else if (fx === 'silent') {
+      // domain expansion: a single, very large, slow ring
+      spawnShockwave(meta.color, 60);
+      // no flash, no shake
+    } else if (fx === 'crush') {
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => spawnShockwave(meta.color, 35 + i*8), i*120);
+      }
+      for (let i = 0; i < 2; i++) spawnArc(meta.color);
+      pulseStar(meta.color, 0.7);
+    } else if (fx === 'ominous') {
+      spawnShockwave(meta.color, 50);
+      pulseStar(meta.color, 0.3);
+    } else if (fx === 'pull') {
+      // contracting ring (spawn a special one)
+      spawnShockwave(meta.color, 18, true);
+      pulseStar(meta.color, 0.5);
+    } else if (fx === 'flash') {
+      // Black Flash: instant, violent
+      spawnShockwave('#ffffff', 50);
+      spawnShockwave(meta.color, 35);
+      for (let i = 0; i < 5; i++) spawnArc(meta.color);
+      pulseStar('#ffffff', 1.5);
+    }
+
+    // Combo
+    const now = performance.now();
+    if (now - state.lastSwitch < 3000 && state.lastSwitch > 0 && tech !== 'neutral') {
+      state.combo = Math.min(99, state.combo + 1);
+    } else if (tech === 'neutral') {
+      state.combo = 0;
+    }
+    state.lastSwitch = now;
+    updateCombo(tech);
+
+    // Audio
+    playSfx(tech);
+
+    showToast(meta.name.toUpperCase());
+  }
+
+  function updateCombo(tech) {
+    document.getElementById('combo-val').textContent = state.combo;
+    const labels = {
+      neutral: '— standby —',
+      red:     'CURSED TECHNIQUE REVERSAL',
+      void:    'DOMAIN EXPANSION',
+      purple:  'IMAGINARY TECHNIQUE',
+      shrine:  'DOMAIN EXPANSION',
+      blue:    'CURSED TECHNIQUE LAPSE',
+      black:   'BLACK FLASH',
+    };
+    document.getElementById('combo-label').textContent = labels[tech] || '';
+  }
+
+  // ====================================================================
+  // AUDIO
+  // ====================================================================
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!CFG.audio) return;
+    if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function playSfx(tech) {
+    if (!CFG.audio || !audioCtx) return;
+    // Show-accurate audio profiles
+    // 赫 Red:    sharp white-noise burst + descending saw = the violent repulsion
+    // 蒼 Blue:   ascending sine + sub-bass = the gentle attractive pull
+    // 茈 Purple: deep rolling rumble + high whine = the fictitious mass
+    // 無量空処 Void: eerie hum + descending data stream = the infinite void
+    // 伏魔御廚子 Shrine: deep bass drone + dissonant bell = Sukuna's dread
+    // 黒閃 Black Flash: massive impact = noise burst + sub-bass thump
+    const presets = {
+      red: [
+        // noise burst (the explosion)
+        { noise: 0.4, d: 0.5, v: 0.20 },
+        // descending push
+        { f: 120, t: 'sawtooth', d: 0.7, s: -90, v: 0.18 },
+        { f: 60,  t: 'sine',     d: 0.7, s: -20, v: 0.15, delay: 0.01 },
+      ],
+      blue: [
+        { f: 80,  t: 'sine',     d: 1.2, s: 200, v: 0.16 },
+        { f: 160, t: 'triangle', d: 1.0, s: 100, v: 0.10, delay: 0.05 },
+        { f: 320, t: 'sine',     d: 0.8, s: 60,  v: 0.06, delay: 0.10 },
+      ],
+      purple: [
+        // deep sub-bass
+        { f: 50,  t: 'sine',     d: 1.4, s: -20, v: 0.20 },
+        // middle rumble
+        { f: 110, t: 'sawtooth', d: 1.2, s: -60, v: 0.14, delay: 0.02 },
+        // high whine (fictitious mass)
+        { f: 880, t: 'sine',     d: 1.0, s: 220, v: 0.06, delay: 0.10 },
+      ],
+      void: [
+        // eerie mid hum
+        { f: 220, t: 'sine',     d: 2.0, s: 0,   v: 0.10 },
+        // descending data stream
+        { f: 660, t: 'triangle', d: 1.5, s: -200, v: 0.06, delay: 0.20 },
+        // very low sub
+        { f: 55,  t: 'sine',     d: 2.0, s: 0,   v: 0.12, delay: 0.05 },
+      ],
+      shrine: [
+        // deep dread bass
+        { f: 45,  t: 'square',   d: 2.0, s: -5,  v: 0.16 },
+        { f: 90,  t: 'sine',     d: 1.8, s: -10, v: 0.10, delay: 0.05 },
+        // dissonant bell (torii)
+        { f: 392, t: 'triangle', d: 1.4, s: 0,   v: 0.06, delay: 0.10 },
+        { f: 466, t: 'triangle', d: 1.4, s: 0,   v: 0.05, delay: 0.10 },  // tritone dissonance
+      ],
+      black: [
+        // massive noise burst
+        { noise: 0.6, d: 0.6, v: 0.25 },
+        // sub-bass thump
+        { f: 40,  t: 'square',   d: 0.4, s: -10, v: 0.22 },
+        // distorted crack
+        { f: 200, t: 'sawtooth', d: 0.3, s: 400, v: 0.12, delay: 0.01 },
+        { f: 80,  t: 'square',   d: 0.5, s: -20, v: 0.18, delay: 0.05 },
+      ],
+    };
+    (presets[tech] || []).forEach(p => {
+      if (p.noise) playNoise(p);
+      else playTone(p);
+    });
+  }
+  function playNoise({ d, v, delay = 0 }) {
+    if (!audioCtx) return;
+    const bufferSize = audioCtx.sampleRate * d;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    const g = audioCtx.createGain();
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(v, audioCtx.currentTime + delay + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + d);
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 3000;
+    source.connect(filter).connect(g).connect(audioCtx.destination);
+    source.start(audioCtx.currentTime + delay);
+    source.stop(audioCtx.currentTime + delay + d + 0.05);
+  }
+  function playTone({ f, t, d, s, v, delay = 0 }) {
+    if (!audioCtx) return;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = t; o.frequency.setValueAtTime(f, audioCtx.currentTime + delay);
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, f + s), audioCtx.currentTime + delay + d);
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime + delay);
+    g.gain.exponentialRampToValueAtTime(v, audioCtx.currentTime + delay + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + d);
+    o.connect(g).connect(audioCtx.destination);
+    o.start(audioCtx.currentTime + delay);
+    o.stop(audioCtx.currentTime + delay + d + 0.05);
+  }
+
+  // ====================================================================
+  // CAMERA
+  // ====================================================================
+  const camUtils = new Camera(videoElement, {
+    onFrame: async () => {
+      if (videoElement.videoWidth) {
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+      }
+      await hands.send({ image: videoElement });
+    },
+    width: 1280, height: 960,
+  });
+  camUtils.start().then(() => {
+    document.getElementById('cam-status').textContent = 'Webcam Live';
+    document.getElementById('cam-dot').classList.add('ok');
+  }).catch(() => {
+    document.getElementById('cam-status').textContent = 'Webcam Blocked';
+  });
+
+  // ====================================================================
+  // UI WIRING
+  // ====================================================================
+  const $ = (id) => document.getElementById(id);
+  function fmt(n, d = 0) { return n.toFixed(d); }
+
+  $('r-count').addEventListener('input', (e) => {
+    const v = parseInt(e.target.value, 10);
+    $('v-count').textContent = (v/1000).toFixed(0) + 'k';
+    buildParticles(v);
+  });
+  $('r-size').addEventListener('input', (e) => {
+    CFG.size = parseFloat(e.target.value);
+    $('v-size').textContent = fmt(CFG.size, 2);
+    for (let i = 0; i < COUNT; i++) targetSizes[i] *= (CFG.size / 0.5);
+  });
+  $('r-bloom').addEventListener('input', (e) => { CFG.bloom = parseFloat(e.target.value); $('v-bloom').textContent = fmt(CFG.bloom, 1); bloomPass.strength = CFG.bloom; });
+  $('r-chroma').addEventListener('input', (e) => { CFG.chroma = parseFloat(e.target.value); $('v-chroma').textContent = fmt(CFG.chroma, 4); fxPass.uniforms.chroma.value = CFG.chroma; });
+  $('r-smooth').addEventListener('input', (e) => { CFG.smooth = parseFloat(e.target.value); $('v-smooth').textContent = fmt(CFG.smooth, 2); });
+  $('r-shake').addEventListener('input', (e) => { CFG.shake = parseFloat(e.target.value); $('v-shake').textContent = fmt(CFG.shake, 2); if (state.currentTech !== 'neutral') state.shakeIntensity = CFG.shake; });
+  $('r-speed').addEventListener('input', (e) => { CFG.speed = parseFloat(e.target.value); $('v-speed').textContent = fmt(CFG.speed, 2); });
+
+  $('btn-audio').addEventListener('click', () => {
+    CFG.audio = !CFG.audio;
+    $('btn-audio').classList.toggle('active', CFG.audio);
+    $('btn-audio').textContent = CFG.audio ? 'Disable Audio' : 'Enable Audio';
+    if (CFG.audio) { ensureAudio(); playSfx('void'); }
+  });
+  $('btn-rec').addEventListener('click', toggleRecording);
+  $('btn-shot').addEventListener('click', takeScreenshot);
+  $('btn-reset').addEventListener('click', () => { buildParticles(CFG.count); setTech('neutral'); showToast('RESET'); });
+
+  function setMode(m) {
+    CFG.mode = m;
+    ['btn-mode-1','btn-mode-2','btn-mode-3','btn-mode-4'].forEach((id, i) => $(id).classList.remove('active'));
+    const map = { mirror: 0, silhouette: 1, ar: 2, fullscreen: 3 };
+    $('btn-mode-' + (map[m]+1)).classList.add('active');
+  }
+  $('btn-mode-1').addEventListener('click', () => setMode('mirror'));
+  $('btn-mode-2').addEventListener('click', () => setMode('silhouette'));
+  $('btn-mode-3').addEventListener('click', () => setMode('ar'));
+  $('btn-mode-4').addEventListener('click', () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+  });
+
+  // Keyboard
+  const KEY_MAP = { '1':'red','2':'void','3':'purple','4':'shrine','5':'blue','6':'black','0':'neutral' };
+  window.addEventListener('keydown', (e) => {
+    if (KEY_MAP[e.key]) setTech(KEY_MAP[e.key]);
+    else if (e.key === 'h' || e.key === 'H') {
+      state.hidden = !state.hidden;
+      document.querySelectorAll('#hud, #panel, #legend, #combo, #technique-name')
+        .forEach(el => el.style.opacity = state.hidden ? '0' : '');
+    }
+    else if (e.key === 'r' || e.key === 'R') toggleRecording();
+    else if (e.key === 'p' || e.key === 'P') takeScreenshot();
+    else if (e.key === 'a' || e.key === 'A') toggleAuto();
+    else if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  // Toast
+  let toastTimer = null;
+  function showToast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 1100);
+  }
+
+  // Auto demo
+  const AUTO_SEQ = ['red','void','purple','shrine','blue','black','neutral'];
+  let autoIdx = 0, autoTimer = null;
+  function toggleAuto() {
+    CFG.auto = !CFG.auto;
+    showToast(CFG.auto ? 'AUTO DEMO ON' : 'AUTO DEMO OFF');
+    if (CFG.auto) {
+      autoIdx = 0;
+      autoTimer = setInterval(() => {
+        setTech(AUTO_SEQ[autoIdx % AUTO_SEQ.length]);
+        autoIdx++;
+      }, 2500);
+    } else clearInterval(autoTimer);
+  }
+
+  // Recording
+  let recorder = null, chunks = [];
+  function toggleRecording() {
+    if (recorder && recorder.state === 'recording') {
+      recorder.stop();
+      showToast('REC STOPPED');
+      return;
+    }
+    try {
+      const stream = renderer.domElement.captureStream(60);
+      chunks = [];
+      recorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+      recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `sat0ru-${Date.now()}.webm`; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        recorder = null;
+      };
+      recorder.start();
+      showToast('● RECORDING');
+      $('btn-rec').classList.add('active');
+    } catch (e) {
+      showToast('REC UNSUPPORTED');
+    }
+  }
+
+  // Screenshot
+  function takeScreenshot() {
+    renderer.domElement.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `sat0ru-${Date.now()}.png`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+    }, 'image/png');
+    showToast('📷 CAPTURED');
+  }
+
+  // ====================================================================
+  // ANIMATION LOOP
+  // ====================================================================
+  let lastTime = performance.now();
+  let frameCount = 0, fpsLast = performance.now();
+  state.starPulse = 0;
+
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt = Math.min(3, (now - lastTime) / 16.6667);
+    lastTime = now;
+    const speedMul = CFG.speed * (TECH_META[state.currentTech]?.speed || 1);
+
+    // FPS
+    frameCount++;
+    if (now - fpsLast > 500) {
+      const fps = Math.round((frameCount * 1000) / (now - fpsLast));
+      $('fps').textContent = fps;
+      $('fps-bar').style.width = Math.min(100, (fps/60)*100) + '%';
+      frameCount = 0; fpsLast = now;
+    }
+    $('latency').textContent = Math.round(performance.now() - now + (now - (frameCount === 0 ? now : now)));
+
+    // Combo decay
+    if (state.combo > 0 && (now - state.lastSwitch) > 3000) {
+      state.combo = Math.max(0, state.combo - 1);
+      $('combo-val').textContent = state.combo;
+    }
+
+    // Shake
+    if (state.shakeIntensity > 0) {
+      const s = state.shakeIntensity * 25;
+      renderer.domElement.style.transform = `translate(${(Math.random()-0.5)*s}px, ${(Math.random()-0.5)*s}px) rotate(${(Math.random()-0.5)*s*0.05}deg)`;
+    } else {
+      renderer.domElement.style.transform = 'translate(0,0) rotate(0)';
+    }
+
+    // Star pulse decay
+    if (state.starPulse > 0) {
+      state.starPulse = Math.max(0, state.starPulse - 0.04 * dt);
+      star.material.uniforms.opacity.value = state.starPulse;
+    }
+
+    // Shockwave update
+    for (let i = state.shockwaves.length - 1; i >= 0; i--) {
+      const s = state.shockwaves[i];
+      s.life += 0.016 * dt;
+      const t = s.life / s.maxLife;
+      if (t >= 1) {
+        shockwaveGroup.remove(s.mesh);
+        s.mesh.geometry.dispose(); s.mesh.material.dispose();
+        state.shockwaves.splice(i, 1);
+        continue;
+      }
+      const scale = s.startScale + (s.endScale - s.startScale) * t;
+      s.mesh.scale.set(scale, scale, scale);
+      s.mesh.material.opacity = (1 - t) * 0.8;
+    }
+    // Arcs update
+    for (let i = state.arcs.length - 1; i >= 0; i--) {
+      const a = state.arcs[i];
+      a.life += 0.016 * dt;
+      const t = a.life / a.maxLife;
+      if (t >= 1) {
+        arcGroup.remove(a.line);
+        a.line.geometry.dispose(); a.line.material.dispose();
+        state.arcs.splice(i, 1);
+        continue;
+      }
+      a.line.material.opacity = (1 - t);
+    }
+
+    // Particle smooth
+    const posArr = particles.geometry.attributes.position.array;
+    const colArr = particles.geometry.attributes.color.array;
+    const sizArr = particles.geometry.attributes.size.array;
+    const k = Math.min(1, CFG.smooth * dt);
+    for (let i = 0, n = COUNT*3; i < n; i++) {
+      posArr[i] += (targetPositions[i] - posArr[i]) * k;
+      colArr[i] += (targetColors[i] - colArr[i]) * k;
+    }
+    for (let i = 0; i < COUNT; i++) sizArr[i] += (targetSizes[i] - sizArr[i]) * k;
+    particles.geometry.attributes.position.needsUpdate = true;
+    particles.geometry.attributes.color.needsUpdate = true;
+    particles.geometry.attributes.size.needsUpdate = true;
+
+    // Rotation
+    switch (state.currentTech) {
+      case 'red':    particles.rotation.z -= 0.018 * speedMul * dt; break;
+      case 'purple': particles.rotation.z += 0.030 * speedMul * dt; particles.rotation.y += 0.008 * dt; break;
+      case 'void':   particles.rotation.y += 0.005 * speedMul * dt; break;
+      case 'shrine': particles.rotation.set(0, 0, 0); break;
+      case 'blue':   particles.rotation.z -= 0.024 * speedMul * dt; break;
+      case 'black':  particles.rotation.z += 0.05 * speedMul * dt; particles.rotation.y -= 0.02 * dt; break;
+      default:       particles.rotation.y += 0.0018 * dt;
+    }
+
+    // FX time
+    fxPass.uniforms.time.value = now * 0.001;
+
+    // Render
+    renderer.info.reset();
+    composer.render();
+    $('dcalls').textContent = renderer.info.render.calls;
+  }
+
+  // ====================================================================
+  // INIT
+  // ====================================================================
+  initShockwaves();
+  initArcs();
+  initStar();
+  buildParticles(CFG.count);
+  setTech('neutral');
+  requestAnimationFrame(animate);
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+    bloomPass.setSize(window.innerWidth, window.innerHeight);
+    fxaaPass.material.uniforms['resolution'].value.set(1/window.innerWidth, 1/window.innerHeight);
+  });
+  fxaaPass.material.uniforms['resolution'].value.set(1/window.innerWidth, 1/window.innerHeight);
+</script>
+</body>
+</html>
